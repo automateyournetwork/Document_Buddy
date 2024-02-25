@@ -1,5 +1,5 @@
-# chat_with_csv
-Chat with CSV using chatGPT 4 Turbo and Langchain
+# Document Buddy
+Chat with various document types - XLSX, PPTX, DOCX, PDF, CSV, TXT - using chatGPT 4 Turbo and Langchain
 
 ## Getting started
 
