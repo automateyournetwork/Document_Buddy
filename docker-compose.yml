@@ -1,0 +1,15 @@
+---
+version: '3'
+ 
+services:
+  document_buddy:
+    image: johncapobianco/document_buddy:document_buddy
+    container_name: document_buddy
+    restart: always        
+    build: 
+      context: ./
+      dockerfile: ./docker/Dockerfile
+    ports:
+      - "8510:8510"
+    volumes:
+      - ./config.toml:/root/.streamlit/config.toml
