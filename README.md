@@ -23,3 +23,5 @@ docker-compose up
 
 ## Visit localhost
 http://localhost:8510
+
+## Thank you
