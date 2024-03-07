@@ -15,7 +15,7 @@ RUN echo "==> Install dos2unix..." \
   && sudo apt-get install dos2unix -y 
 
 RUN echo "==> Install langchain requirements.." \
-  && pip install -U --quiet langchain_experimental langchain langchain-openai langchain-community \
+  && pip install -U --quiet langchain_experimental langchain langchain-openai langchain-community langchain-anthropic \
   && pip install chromadb \
   && pip install openai \
   && pip install tiktoken \
