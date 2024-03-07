@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_anthropic import ChatAnthropic
 from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import CSVLoader, PyMuPDFLoader, TextLoader, UnstructuredPowerPointLoader, Docx2txtLoader, UnstructuredExcelLoader
 from langchain.memory import ConversationBufferMemory
@@ -11,6 +12,7 @@ from langchain_experimental.text_splitter import SemanticChunker
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv('OPENAI_API_KEY')
+anthropic_api_key = os.environ["ANTHROPIC_API_KEY"]
 
 # Message classes
 class Message:
@@ -25,10 +27,10 @@ class AIMessage(Message):
     """Represents a message from the AI."""
     pass
 
-class ChatWithFile:  # Renamed from ChatWithCSV
+class ChatWithFile:
     def __init__(self, file_path, file_type):
         self.file_path = file_path
-        self.file_type = file_type  # Accept file type as a parameter
+        self.file_type = file_type
         self.conversation_history = []
         self.load_file()
         self.split_into_chunks()
@@ -53,7 +55,7 @@ class ChatWithFile:  # Renamed from ChatWithCSV
         self.pages = self.loader.load_and_split()
 
     def split_into_chunks(self):
-        self.text_splitter = SemanticChunker(OpenAIEmbeddings())
+        self.text_splitter = SemanticChunker(OpenAIEmbeddings(), breakpoint_threshold_type="percentile")
         self.docs = self.text_splitter.split_documents(self.pages)
 
     def store_in_chroma(self):
@@ -77,14 +79,42 @@ class ChatWithFile:  # Renamed from ChatWithCSV
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
     def setup_conversation_retrieval_chain(self):
-        self.llm = ChatOpenAI(temperature=0, model="gpt-4-1106-preview")
-        self.qa = ConversationalRetrievalChain.from_llm(self.llm, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
+        self.llm = None
+        self.llm_anthropic = None
+
+        # Only initialize OpenAI's LLM if the API key is provided
+        if openai_api_key:
+            self.llm = ChatOpenAI(temperature=0.7, model="gpt-4-1106-preview", openai_api_key=openai_api_key)
+
+        # Only initialize Anthropic's LLM if the API key is provided
+        if anthropic_api_key:
+            self.llm_anthropic = ChatAnthropic(temperature=0.7, model_name="claude-3-opus-20240229", anthropic_api_key=anthropic_api_key)
+
+        if self.llm:
+            self.qa = ConversationalRetrievalChain.from_llm(self.llm, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
+        if self.llm_anthropic:
+            self.anthropic_qa = ConversationalRetrievalChain.from_llm(self.llm_anthropic, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
 
     def chat(self, question):
-        response = self.qa.invoke(question)
+        response_openai = {"answer": None}
+        response_anthropic = {"answer": None}
+
+        # Query OpenAI's GPT model if initialized
+        if self.llm:
+            response_openai = self.qa.invoke(question)
+
+        # Query Anthropic's model if initialized
+        if self.llm_anthropic:
+            response_anthropic = self.anthropic_qa.invoke(question)
+
+        # Append user's question and responses to conversation history
         self.conversation_history.append(HumanMessage(content=question))
-        self.conversation_history.append(AIMessage(content=response.get('answer', 'Response not structured as expected.')))
-        return response
+        if self.llm:
+            self.conversation_history.append(AIMessage(content=f"OpenAI's response: {response_openai.get('answer', 'Response not structured as expected.')}"))
+        if self.llm_anthropic:
+            self.conversation_history.append(AIMessage(content=f"Anthropic's response: {response_anthropic.get('answer', 'Response not structured as expected.')}"))
+
+        return response_openai, response_anthropic
 
 def upload_and_handle_file():
     st.title('Document Buddy - Chat with Document Data')
@@ -119,7 +149,6 @@ def upload_and_handle_file():
         else:
             st.error("Unsupported file type. Please upload a XLSX, PPTX, DOCX, PDF, CSV, or TXT file.")
 
-# Adjusted part in chat_interface function:
 def chat_interface():
     st.title('Document Buddy - Chat with Document Data')
     file_path = st.session_state.get('file_path')
@@ -128,20 +157,29 @@ def chat_interface():
         st.error("File missing. Please go back and upload a file.")
         return
 
-    # Adjust the instantiation here to pass file_path and file_type
     if 'chat_instance' not in st.session_state:
         st.session_state['chat_instance'] = ChatWithFile(file_path=file_path, file_type=file_type)
 
     user_input = st.text_input("Ask a question about the document data:")
     if user_input and st.button("Send"):
         with st.spinner('Thinking...'):
-            response = st.session_state['chat_instance'].chat(user_input)
-            st.markdown("**Answer:**")
-            if isinstance(response, dict) and 'answer' in response:
-                st.markdown(response['answer'])
+            response_openai, response_anthropic = st.session_state['chat_instance'].chat(user_input)
+            
+            st.markdown("**Answers:**")
+            
+            # Display OpenAI's response
+            if 'answer' in response_openai:
+                st.markdown(f"**OpenAI's response:** {response_openai['answer']}")
             else:
-                st.markdown("No specific answer found.")
+                st.markdown("**OpenAI's response:** No specific answer found.")
+                
+            # Display Anthropic's response
+            if 'answer' in response_anthropic:
+                st.markdown(f"**Anthropic's response:** {response_anthropic['answer']}")
+            else:
+                st.markdown("**Anthropic's response:** No specific answer found.")
 
+            # Display chat history
             st.markdown("**Chat History:**")
             for message in st.session_state['chat_instance'].conversation_history:
                 prefix = "*You:* " if isinstance(message, HumanMessage) else "*AI:* "
