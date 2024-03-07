@@ -79,44 +79,32 @@ class ChatWithFile:  # Renamed from ChatWithCSV
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
     def setup_conversation_retrieval_chain(self):
-        self.qa_chains = []  # Initialize an empty list to hold the active QA chains
-
-        # Check if the OpenAI API key is provided and set up the OpenAI conversational retrieval chain
-        if openai_api_key:
-            self.llm_openai = ChatOpenAI(api_key=openai_api_key, temperature=0.7, model="gpt-4-1106-preview")
-            openai_qa = ConversationalRetrievalChain.from_llm(self.llm_openai, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
-            self.qa_chains.append(openai_qa)
-
-        # Check if the Anthropic API key is provided and set up the Anthropic conversational retrieval chain
-        if anthropic_api_key:
-            self.llm_anthropic = ChatAnthropic(api_key=anthropic_api_key, temperature=0.7, model_name="claude-3-opus-20240229")
-            anthropic_qa = ConversationalRetrievalChain.from_llm(self.llm_anthropic, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
-            self.qa_chains.append(anthropic_qa)
-
-        # If neither API key is provided, you might want to raise an error or handle this case appropriately
-        if not self.qa_chains:
-            raise ValueError("No API keys provided for OpenAI or Anthropic. Please provide at least one.")
+        self.llm = ChatOpenAI(temperature=0.7, model="gpt-4-1106-preview")
+        
+        # Adjusted Anthropic model instantiation with api_key included in model_kwargs
+        self.llm_anthropic = ChatAnthropic(temperature=0.7, model_name="claude-3-opus-20240229", anthropic_api_key=anthropic_api_key)
+    
+        self.qa = ConversationalRetrievalChain.from_llm(self.llm, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
+        self.anthropic_qa = ConversationalRetrievalChain.from_llm(self.llm_anthropic, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
 
     def chat(self, question):
-        responses = []
+        # Query OpenAI's GPT model
+        response_openai = self.qa.invoke(question)
 
-        # Check if OpenAI's API key is available and query OpenAI's GPT model
-        if openai_api_key:
-            response_openai = self.qa.invoke(question)
-            self.conversation_history.append(HumanMessage(content=question))
-            self.conversation_history.append(AIMessage(content=f"OpenAI's response: {response_openai.get('answer', 'Response not structured as expected.')}"))
-            responses.append(response_openai)
+        # Query Anthropic's model
+        response_anthropic = self.anthropic_qa.invoke(question)
 
-        # Check if Anthropic's API key is available and query Anthropic's model
-        if anthropic_api_key:
-            response_anthropic = self.anthropic_qa.invoke(question)
-            # No need to append the question again if OpenAI's response is already appended
-            if not openai_api_key:
-                self.conversation_history.append(HumanMessage(content=question))
-            self.conversation_history.append(AIMessage(content=f"Anthropic's response: {response_anthropic.get('answer', 'Response not structured as expected.')}"))
-            responses.append(response_anthropic)
+        # Append user's question to conversation history
+        self.conversation_history.append(HumanMessage(content=question))
 
-        return responses
+        # Append OpenAI's response to conversation history
+        self.conversation_history.append(AIMessage(content=f"OpenAI's response: {response_openai.get('answer', 'Response not structured as expected.')}"))
+
+        # Append Anthropic's response to conversation history
+        self.conversation_history.append(AIMessage(content=f"Anthropic's response: {response_anthropic.get('answer', 'Response not structured as expected.')}"))
+
+        # You might return both responses or handle them differently based on your application's needs
+        return response_openai, response_anthropic
 
 def upload_and_handle_file():
     st.title('Document Buddy - Chat with Document Data')
