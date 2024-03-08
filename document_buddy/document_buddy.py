@@ -114,7 +114,7 @@ class ChatWithFile:
                 # Here, the response should already be leveraging your ChromaDB
                 # and the document data it contains for generating answers.
                 st.write("Query:", query)
-                st.write("Response:", response.answer)
+                st.write("Response:", response['answer'])
                 all_results.append(response)
             else:
                 st.write("No response received.")
