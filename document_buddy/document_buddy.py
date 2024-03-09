@@ -98,35 +98,48 @@ class ChatWithFile:
             self.anthropic_qa = ConversationalRetrievalChain.from_llm(self.llm_anthropic, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
 
     def chat(self, question):
-        related_queries = self.generate_related_queries(question)
+        # Generate related queries based on the initial question
+        related_queries_dicts = self.generate_related_queries(question)
+        # Ensure that queries are in string format, extracting the 'query' value from dictionaries
+        related_queries = [q['query'] for q in related_queries_dicts]
+        # Combine the original question with the related queries
         queries = [question] + related_queries
 
         all_results = []
 
-        for query in queries:
+        for idx, query_text in enumerate(queries):
             response = None
+            # Check which language model to use based on available API keys
             if self.llm:
-                response = self.qa.invoke({"question": query})
+                response = self.qa.invoke(query_text)
             elif self.llm_anthropic:
-                response = self.anthropic_qa.invoke({"question": query})
+                response = self.qa_anthropic.invoke(query_text)
 
+            # Process the response
             if response:
-                # Here, the response should already be leveraging your ChromaDB
-                # and the document data it contains for generating answers.
-                st.write("Query:", query)
+                st.write("Query:", query_text)
                 st.write("Response:", response['answer'])
                 all_results.append(response)
             else:
-                st.write("No response received.")
+                st.write("No response received for:", query_text)
 
         # Rank the results using RRF
-        st.write("All results before RRF:", all_results)                    
+        st.write("All results before RRF:", all_results)
         ranked_results = self.reciprocal_rank_fusion(all_results)
-        st.write("Ranked Results:", ranked_results)
-        return ranked_results
+        if ranked_results:
+            st.write("Ranked Results:")
+            for idx, result in enumerate(ranked_results, start=1):
+                # Note the use of 'result' directly, assuming it includes the necessary information
+                st.write(f"Rank {idx}: {result['doc']['answer']} (Score: {result['score']})")
+            top_result = ranked_results[0]['doc']
+            st.write("Top Ranked Result:", top_result['answer'])
+        else:
+            st.write("No ranked results available.")
+
+        return top_result
 
     def generate_related_queries(self, original_query):
-        prompt = f"Given the original query: '{original_query}', generate a JSON array of four related search queries."
+        prompt = f"In light of the original inquiry: '{original_query}', let's delve deeper and broaden our exploration. Please construct a JSON array containing four distinct but interconnected search queries. Each query should reinterpret the original prompt's essence, introducing new dimensions or perspectives to investigate. Aim for a blend of complexity and specificity in your rephrasings, ensuring each query unveils different facets of the original question. This approach is intended to encapsulate a more comprehensive understanding and generate the most insightful answers possible. Only respond with the JSON array itself."
         response = self.llm.invoke(input=prompt)
 
         if hasattr(response, 'content'):
@@ -151,7 +164,7 @@ class ChatWithFile:
             related_queries = json.loads(json_str)
             st.write("Parsed related queries:", related_queries)
         except (ValueError, json.JSONDecodeError) as e:
-            st.error(f"Failed to parse JSON: {e}")
+            #st.error(f"Failed to parse JSON: {e}")
             related_queries = []
 
         return related_queries
@@ -167,15 +180,14 @@ class ChatWithFile:
         fused_scores = {}
         for rank, results in enumerate(results_lists):
             if isinstance(results, dict):
-                # Using the query as a unique identifier for each set of results
                 doc_id = results.get("question")
                 score = fused_scores.get(doc_id, {"score": 0})["score"]
                 fused_scores[doc_id] = {"doc": results, "score": score + 1 / (rank + 1 + k)}
-
+    
         # Sort by fused score
         reranked_results = sorted(fused_scores.values(), key=lambda x: x["score"], reverse=True)
-
-        return [entry["doc"] for entry in reranked_results]
+    
+        return reranked_results 
 
 def upload_and_handle_file():
     st.title('Document Buddy - Chat with Document Data')
@@ -224,14 +236,16 @@ def chat_interface():
     user_input = st.text_input("Ask a question about the document data:")
     if user_input and st.button("Send"):
         with st.spinner('Thinking...'):
-            all_answers = st.session_state['chat_instance'].chat(user_input)
+            top_result = st.session_state['chat_instance'].chat(user_input)
             
-            # Display all collected answers
-            st.markdown("**Answers:**")
-            for answer in all_answers:
-                st.markdown(answer)
+            # Display the top result's answer as markdown for better readability
+            if top_result:
+                st.markdown("**Top Answer:**")
+                st.markdown(f"> {top_result['answer']}")
+            else:
+                st.write("No top result available.")
                 
-            # Display chat history (You might want to adjust how or if you display this based on the new output)
+            # Display chat history
             st.markdown("**Chat History:**")
             for message in st.session_state['chat_instance'].conversation_history:
                 prefix = "*You:* " if isinstance(message, HumanMessage) else "*AI:* "
