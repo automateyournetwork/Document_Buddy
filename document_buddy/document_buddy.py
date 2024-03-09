@@ -1,4 +1,5 @@
 import os
+import json
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -8,11 +9,10 @@ from langchain_community.document_loaders import CSVLoader, PyMuPDFLoader, TextL
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from langchain_experimental.text_splitter import SemanticChunker
+from langchain.load import dumps, loads
 
 # Load environment variables
 load_dotenv()
-openai_api_key = os.getenv('OPENAI_API_KEY')
-anthropic_api_key = os.environ["ANTHROPIC_API_KEY"]
 
 # Message classes
 class Message:
@@ -29,6 +29,8 @@ class AIMessage(Message):
 
 class ChatWithFile:
     def __init__(self, file_path, file_type):
+        self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        self.anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
         self.file_path = file_path
         self.file_type = file_type
         self.conversation_history = []
@@ -83,12 +85,12 @@ class ChatWithFile:
         self.llm_anthropic = None
 
         # Only initialize OpenAI's LLM if the API key is provided
-        if openai_api_key:
-            self.llm = ChatOpenAI(temperature=0.7, model="gpt-4-1106-preview", openai_api_key=openai_api_key)
+        if self.openai_api_key:
+            self.llm = ChatOpenAI(temperature=0.7, model="gpt-4-1106-preview", openai_api_key=self.openai_api_key)
 
         # Only initialize Anthropic's LLM if the API key is provided
-        if anthropic_api_key:
-            self.llm_anthropic = ChatAnthropic(temperature=0.7, model_name="claude-3-opus-20240229", anthropic_api_key=anthropic_api_key)
+        if self.anthropic_api_key:
+            self.llm_anthropic = ChatAnthropic(temperature=0.7, model_name="claude-3-opus-20240229", anthropic_api_key=self.anthropic_api_key)
 
         if self.llm:
             self.qa = ConversationalRetrievalChain.from_llm(self.llm, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
@@ -96,25 +98,96 @@ class ChatWithFile:
             self.anthropic_qa = ConversationalRetrievalChain.from_llm(self.llm_anthropic, self.vectordb.as_retriever(search_kwargs={"k": 10}), memory=self.memory)
 
     def chat(self, question):
-        response_openai = {"answer": None}
-        response_anthropic = {"answer": None}
+        # Generate related queries based on the initial question
+        related_queries_dicts = self.generate_related_queries(question)
+        # Ensure that queries are in string format, extracting the 'query' value from dictionaries
+        related_queries = [q['query'] for q in related_queries_dicts]
+        # Combine the original question with the related queries
+        queries = [question] + related_queries
 
-        # Query OpenAI's GPT model if initialized
-        if self.llm:
-            response_openai = self.qa.invoke(question)
+        all_results = []
 
-        # Query Anthropic's model if initialized
-        if self.llm_anthropic:
-            response_anthropic = self.anthropic_qa.invoke(question)
+        for idx, query_text in enumerate(queries):
+            response = None
+            # Check which language model to use based on available API keys
+            if self.llm:
+                response = self.qa.invoke(query_text)
+            elif self.llm_anthropic:
+                response = self.qa_anthropic.invoke(query_text)
 
-        # Append user's question and responses to conversation history
-        self.conversation_history.append(HumanMessage(content=question))
-        if self.llm:
-            self.conversation_history.append(AIMessage(content=f"OpenAI's response: {response_openai.get('answer', 'Response not structured as expected.')}"))
-        if self.llm_anthropic:
-            self.conversation_history.append(AIMessage(content=f"Anthropic's response: {response_anthropic.get('answer', 'Response not structured as expected.')}"))
+            # Process the response
+            if response:
+                # st.write("Query:", query_text)
+                # st.write("Response:", response['answer'])
+                all_results.append(response)
+            else:
+                st.write("No response received for:", query_text)
 
-        return response_openai, response_anthropic
+        # Rank the results using RRF
+        #st.write("All results before RRF:", all_results)
+        ranked_results = self.reciprocal_rank_fusion(all_results)
+        if ranked_results:
+            #st.write("Ranked Results:")
+            #for idx, result in enumerate(ranked_results, start=1):
+                # Note the use of 'result' directly, assuming it includes the necessary information
+                #st.write(f"Rank {idx}: {result['doc']['answer']} (Score: {result['score']})")
+            top_result = ranked_results[0]['doc']
+            #st.write("Top Ranked Result:", top_result['answer'])
+        else:
+            st.write("No ranked results available.")
+
+        return top_result
+
+    def generate_related_queries(self, original_query):
+        prompt = f"In light of the original inquiry: '{original_query}', let's delve deeper and broaden our exploration. Please construct a JSON array containing four distinct but interconnected search queries. Each query should reinterpret the original prompt's essence, introducing new dimensions or perspectives to investigate. Aim for a blend of complexity and specificity in your rephrasings, ensuring each query unveils different facets of the original question. This approach is intended to encapsulate a more comprehensive understanding and generate the most insightful answers possible. Only respond with the JSON array itself."
+        response = self.llm.invoke(input=prompt)
+
+        if hasattr(response, 'content'):
+            # Directly access the 'content' if the response is the expected object
+            generated_text = response.content
+        elif isinstance(response, dict) and 'content' in response:
+            # Extract 'content' if the response is a dict
+            generated_text = response['content']
+        else:
+            # Fallback if the structure is different or unknown
+            generated_text = str(response)
+            st.error("Unexpected response format.")
+
+        #st.write("Response content:", generated_text)
+
+        # Assuming the 'content' starts with "content='" and ends with "'"
+        # Attempt to directly parse the JSON part, assuming no other wrapping
+        try:
+            json_start = generated_text.find('[')
+            json_end = generated_text.rfind(']') + 1
+            json_str = generated_text[json_start:json_end]
+            related_queries = json.loads(json_str)
+            #st.write("Parsed related queries:", related_queries)
+        except (ValueError, json.JSONDecodeError) as e:
+            #st.error(f"Failed to parse JSON: {e}")
+            related_queries = []
+
+        return related_queries
+
+    def retrieve_documents(self, query):
+        # Example: Convert query to embeddings and perform a vector search in ChromaDB
+        query_embedding = OpenAIEmbeddings()  # Assuming SemanticChunker can embed text
+        search_results = self.vectordb.search(query_embedding, top_k=5)  # Adjust based on your setup
+        document_ids = [result['id'] for result in search_results]  # Extract document IDs from results
+        return document_ids
+
+    def reciprocal_rank_fusion(self, results_lists, k=60):
+        fused_scores = {}
+        for rank, results in enumerate(results_lists):
+            if isinstance(results, dict):
+                doc_id = results.get("question")
+                score = fused_scores.get(doc_id, {"score": 0})["score"]
+                fused_scores[doc_id] = {"doc": results, "score": score + 1 / (rank + 1 + k)}
+    
+        # Sort by fused score
+        reranked_results = sorted(fused_scores.values(), key=lambda x: x["score"], reverse=True)
+    
+        return reranked_results 
 
 def upload_and_handle_file():
     st.title('Document Buddy - Chat with Document Data')
@@ -163,22 +236,15 @@ def chat_interface():
     user_input = st.text_input("Ask a question about the document data:")
     if user_input and st.button("Send"):
         with st.spinner('Thinking...'):
-            response_openai, response_anthropic = st.session_state['chat_instance'].chat(user_input)
+            top_result = st.session_state['chat_instance'].chat(user_input)
             
-            st.markdown("**Answers:**")
-            
-            # Display OpenAI's response
-            if 'answer' in response_openai:
-                st.markdown(f"**OpenAI's response:** {response_openai['answer']}")
+            # Display the top result's answer as markdown for better readability
+            if top_result:
+                st.markdown("**Top Answer:**")
+                st.markdown(f"> {top_result['answer']}")
             else:
-                st.markdown("**OpenAI's response:** No specific answer found.")
+                st.write("No top result available.")
                 
-            # Display Anthropic's response
-            if 'answer' in response_anthropic:
-                st.markdown(f"**Anthropic's response:** {response_anthropic['answer']}")
-            else:
-                st.markdown("**Anthropic's response:** No specific answer found.")
-
             # Display chat history
             st.markdown("**Chat History:**")
             for message in st.session_state['chat_instance'].conversation_history:
