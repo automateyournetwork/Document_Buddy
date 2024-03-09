@@ -117,26 +117,37 @@ class ChatWithFile:
 
             # Process the response
             if response:
-                # st.write("Query:", query_text)
-                # st.write("Response:", response['answer'])
-                all_results.append(response)
+                st.write("Query:", query_text)
+                st.write("Response:", response['answer'])
+                all_results.append({'query': query_text, 'answer': response['answer']})
             else:
                 st.write("No response received for:", query_text)
 
-        # Rank the results using RRF
-        #st.write("All results before RRF:", all_results)
-        ranked_results = self.reciprocal_rank_fusion(all_results)
-        if ranked_results:
-            #st.write("Ranked Results:")
-            #for idx, result in enumerate(ranked_results, start=1):
-                # Note the use of 'result' directly, assuming it includes the necessary information
-                #st.write(f"Rank {idx}: {result['doc']['answer']} (Score: {result['score']})")
-            top_result = ranked_results[0]['doc']
-            #st.write("Top Ranked Result:", top_result['answer'])
-        else:
-            st.write("No ranked results available.")
+        # After gathering all results, let's ask the LLM to synthesize a comprehensive answer
+        if all_results:
+            # Assuming reciprocal_rank_fusion is correctly applied and scored_results is prepared
+            reranked_results = self.reciprocal_rank_fusion(all_results)
+            # Prepare scored_results, ensuring it has the correct structure
+            scored_results = [{'score': res['score'], **res['doc']} for res in reranked_results]
+            synthesis_prompt = self.create_synthesis_prompt(question, scored_results)
+            synthesized_response = self.llm.invoke(synthesis_prompt)
+            
+            if synthesized_response:
+                # Assuming synthesized_response is an AIMessage object with a 'content' attribute
+                st.write(synthesized_response)
+                final_answer = synthesized_response.content
+            else:
+                final_answer = "Unable to synthesize a response."
+            
+            # Update conversation history with the original question and the synthesized answer
+            self.conversation_history.append(HumanMessage(content=question))
+            self.conversation_history.append(AIMessage(content=final_answer))
 
-        return top_result
+            return {'answer': final_answer}
+        else:
+            self.conversation_history.append(HumanMessage(content=question))
+            self.conversation_history.append(AIMessage(content="No answer available."))
+            return {'answer': "No results were available to synthesize a response."}
 
     def generate_related_queries(self, original_query):
         prompt = f"In light of the original inquiry: '{original_query}', let's delve deeper and broaden our exploration. Please construct a JSON array containing four distinct but interconnected search queries. Each query should reinterpret the original prompt's essence, introducing new dimensions or perspectives to investigate. Aim for a blend of complexity and specificity in your rephrasings, ensuring each query unveils different facets of the original question. This approach is intended to encapsulate a more comprehensive understanding and generate the most insightful answers possible. Only respond with the JSON array itself."
@@ -176,19 +187,35 @@ class ChatWithFile:
         document_ids = [result['id'] for result in search_results]  # Extract document IDs from results
         return document_ids
 
-    def reciprocal_rank_fusion(self, results_lists, k=60):
+    def reciprocal_rank_fusion(self, all_results, k=60):
+        # Assuming each result in all_results can be uniquely identified for scoring
+        # And assuming all_results is directly the list you want to work with
         fused_scores = {}
-        for rank, results in enumerate(results_lists):
-            if isinstance(results, dict):
-                doc_id = results.get("question")
-                score = fused_scores.get(doc_id, {"score": 0})["score"]
-                fused_scores[doc_id] = {"doc": results, "score": score + 1 / (rank + 1 + k)}
-    
-        # Sort by fused score
-        reranked_results = sorted(fused_scores.values(), key=lambda x: x["score"], reverse=True)
-    
-        return reranked_results 
+        for result in all_results:
+            # Let's assume you have a way to uniquely identify each result; for simplicity, use its index
+            doc_id = result['query']  # or any unique identifier within each result
+            if doc_id not in fused_scores:
+                fused_scores[doc_id] = {"doc": result, "score": 0}
+            # Example scoring adjustment; this part needs to be aligned with your actual scoring logic
+            fused_scores[doc_id]["score"] += 1  # Simplified; replace with actual scoring logic
 
+        reranked_results = sorted(fused_scores.values(), key=lambda x: x["score"], reverse=True)
+        return reranked_results
+
+    def create_synthesis_prompt(self, original_question, all_results):
+        # Sort the results based on RRF score if not already sorted; highest scores first
+        sorted_results = sorted(all_results, key=lambda x: x['score'], reverse=True)
+        st.write("Sorted Results", sorted_results)
+        prompt = f"Based on the user's original question: '{original_question}', here are the answers to the original and related questions, ordered by their relevance (with RRF scores). Please synthesize a comprehensive answer focusing on answering the original question using all the information provided below:\n\n"
+        
+        # Include RRF scores in the prompt, and emphasize higher-ranked answers
+        for idx, result in enumerate(sorted_results):
+            prompt += f"Answer {idx+1} (Score: {result['score']}): {result['answer']}\n\n"
+        
+        prompt += "Given the above answers, especially considering those with higher scores, please provide the best possible composite answer to the user's original question."
+        
+        return prompt
+    
 def upload_and_handle_file():
     st.title('Document Buddy - Chat with Document Data')
     uploaded_file = st.file_uploader("Choose a XLSX, PPTX, DOCX, PDF, CSV, or TXT file", type=["xlsx", "pptx", "docx", "pdf", "csv", "txt"])
