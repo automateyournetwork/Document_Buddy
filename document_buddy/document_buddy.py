@@ -117,22 +117,22 @@ class ChatWithFile:
 
             # Process the response
             if response:
-                st.write("Query:", query_text)
-                st.write("Response:", response['answer'])
+                # st.write("Query:", query_text)
+                # st.write("Response:", response['answer'])
                 all_results.append(response)
             else:
                 st.write("No response received for:", query_text)
 
         # Rank the results using RRF
-        st.write("All results before RRF:", all_results)
+        #st.write("All results before RRF:", all_results)
         ranked_results = self.reciprocal_rank_fusion(all_results)
         if ranked_results:
-            st.write("Ranked Results:")
-            for idx, result in enumerate(ranked_results, start=1):
+            #st.write("Ranked Results:")
+            #for idx, result in enumerate(ranked_results, start=1):
                 # Note the use of 'result' directly, assuming it includes the necessary information
-                st.write(f"Rank {idx}: {result['doc']['answer']} (Score: {result['score']})")
+                #st.write(f"Rank {idx}: {result['doc']['answer']} (Score: {result['score']})")
             top_result = ranked_results[0]['doc']
-            st.write("Top Ranked Result:", top_result['answer'])
+            #st.write("Top Ranked Result:", top_result['answer'])
         else:
             st.write("No ranked results available.")
 
@@ -153,7 +153,7 @@ class ChatWithFile:
             generated_text = str(response)
             st.error("Unexpected response format.")
 
-        st.write("Response content:", generated_text)
+        #st.write("Response content:", generated_text)
 
         # Assuming the 'content' starts with "content='" and ends with "'"
         # Attempt to directly parse the JSON part, assuming no other wrapping
@@ -162,7 +162,7 @@ class ChatWithFile:
             json_end = generated_text.rfind(']') + 1
             json_str = generated_text[json_start:json_end]
             related_queries = json.loads(json_str)
-            st.write("Parsed related queries:", related_queries)
+            #st.write("Parsed related queries:", related_queries)
         except (ValueError, json.JSONDecodeError) as e:
             #st.error(f"Failed to parse JSON: {e}")
             related_queries = []
