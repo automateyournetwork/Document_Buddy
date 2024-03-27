@@ -1,38 +1,30 @@
-FROM ubuntu:latest
+# Stage 1: Create a virtual environment, install requirements, copy core
+# app files to the working directory
+FROM python:3.11.8-slim AS builder
+WORKDIR /app
+ENV VIRTUAL_ENV=/app/.venv
+RUN python -m venv ${VIRTUAL_ENV}
+ENV PATH=${VIRTUAL_ENV}/bin:${PATH}
 
-ARG DEBIAN_FRONTEND=noninteractive
+COPY /requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY /document_buddy .
 
-RUN echo "==> Upgrading apk and installing system utilities ...." \
- && apt -y update \
- && apt-get install -y wget \
- && apt-get -y install sudo
+# Stage 2: Add the app user, copy the venv and app from the builder image,
+# and launch the app.
+FROM python:3.11.8-slim AS app
+ARG APP_USERNAME
+ARG APP_UID
+ARG APP_GID=${APP_UID}
 
-RUN echo "==> Installing Python3 and pip ...." \  
- && apt-get install python3 -y \
- && apt install python3-pip -y
+WORKDIR /app
 
-RUN echo "==> Install dos2unix..." \
-  && sudo apt-get install dos2unix -y 
+RUN groupadd --gid ${APP_GID} ${APP_USERNAME} && \
+    useradd --uid ${APP_UID} --gid ${APP_GID} -m ${APP_USERNAME}
 
-RUN echo "==> Install langchain requirements.." \
-  && pip install -U --quiet langchain_experimental langchain langchain-openai langchain-community langchain-anthropic \
-  && pip install chromadb \
-  && pip install openai \
-  && pip install tiktoken \
-  && pip install pymupdf \ 
-  && pip install unstructured \
-  && pip install python-pptx \
-  && pip install --upgrade --quiet  docx2txt \
-  && pip install networkx \
-  && pip install openpyxl
+COPY --from=builder --chown=${APP_USERNAME}:${APP_USERNAME} /app .
+USER ${APP_USERNAME}
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH=${VIRTUAL_ENV}/bin:${PATH}
 
-RUN echo "==> Install streamlit.." \
-  && pip install streamlit --upgrade
-
-COPY /document_buddy /document_buddy/
-COPY /scripts /scripts/
-
-RUN echo "==> Convert script..." \
-  && dos2unix /scripts/startup.sh
-
-CMD ["/bin/bash", "/scripts/startup.sh"]
+CMD ["streamlit", "run", "document_buddy.py"]
