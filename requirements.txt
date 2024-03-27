@@ -1,0 +1,15 @@
+chromadb == 0.4.24
+docx2txt == 0.8
+langchain == 0.1.12
+langchain-anthropic == 0.1.4
+langchain-community == 0.0.28
+langchain_experimental == 0.0.54
+langchain-openai == 0.0.8
+networkx == 3.2.1
+openai == 1.14.0
+openpyxl == 3.1.2
+pymupdf == 1.23.26
+python-pptx == 0.6.23
+streamlit == 1.32.2
+tiktoken == 0.6.0
+unstructured == 0.12.6
