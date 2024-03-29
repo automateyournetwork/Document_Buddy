@@ -20,9 +20,10 @@ ARG APP_GID=${APP_UID}
 WORKDIR /app
 
 RUN groupadd --gid ${APP_GID} ${APP_USERNAME} && \
-    useradd --uid ${APP_UID} --gid ${APP_GID} -m ${APP_USERNAME}
+    useradd --uid ${APP_UID} --gid ${APP_GID} -m ${APP_USERNAME} && \
+    chown ${APP_USERNAME}:${APP_USERNAME} /app
 
-COPY --from=builder --chown=${APP_USERNAME}:${APP_USERNAME} /app .
+COPY --from=builder --chown=${APP_USERNAME}:${APP_USERNAME} /app ./
 USER ${APP_USERNAME}
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH=${VIRTUAL_ENV}/bin:${PATH}

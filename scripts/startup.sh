@@ -1,2 +1,0 @@
-cd document_buddy
-streamlit run document_buddy.py
