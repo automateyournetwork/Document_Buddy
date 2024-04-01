@@ -1,15 +1,24 @@
 ---
-version: '3'
- 
 services:
   document_buddy:
     image: johncapobianco/document_buddy:document_buddy
     container_name: document_buddy
-    restart: always        
-    build: 
+    restart: always
+    build:
       context: ./
       dockerfile: ./docker/Dockerfile
+      args:
+        APP_USERNAME: docubuddy
+        APP_UID: 1000
     ports:
       - "8510:8510"
+    environment:
+      SECRETS_PATH: /run/secrets/api_keys
+    secrets:
+      - api_keys
     volumes:
-      - ./config.toml:/root/.streamlit/config.toml
+      - ./config.toml:/app/.streamlit/config.toml
+
+secrets:
+  api_keys:
+    file: document_buddy/.env

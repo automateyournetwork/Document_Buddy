@@ -1,0 +1,13 @@
+[MESSAGES CONTROL]
+# Disregard imports that aren't structured "properly"
+disable=
+    no-name-in-module,
+    no-member,
+    too-few-public-methods,
+
+[FORMAT]
+# 120 is reasonable for today's IDEs...
+max-line-length=120
+
+# Ignore long lines if it's due to an inline comment
+ignore-long-lines=^\s*(.*)\s+#.*$
