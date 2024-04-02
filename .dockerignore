@@ -1,0 +1,11 @@
+# Do not add the Git repository (if present)
+.git
+
+# Don't add the .env file to the image if present
+**/.env
+
+# Ignore any distribution or example files
+**/*.dist
+
+# Python excludes
+**/.pylintrc

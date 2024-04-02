@@ -3,23 +3,22 @@ Chat with various document types - XLSX, PPTX, DOCX, PDF, CSV, TXT - using chatG
 
 ## Getting started
 
-Clone the repo
+1. Clone the repo
 
-Make a .env file inside the document_buddy subfolder (where the document_buddy.py file is located; /document_buddy/document_buddy)
+2. Copy the `document_buddy/.env.dist` file to `document_buddy/.env`:
 
-put this in the file:
+   ```shell
+   cp document_buddy/.env.dist document_buddy/.env
+   ```
 
-```console
-OPENAI_API_KEY="<your openapi api key>"
-ANTHROPIC_API_KEY="<your Anthropic api key>"
-```
+3. Edit the `document_buddy/.env` file and add your API key(s). You can add either an OpenAI key, an Anthropic key, or both if you would like to get answers from both services:
 
-If you need an OpenAI key visit https://platform.openai.com to get one
+   - If you need an OpenAI key, visit https://platform.openai.com
 
-If you need an Anthropic key visit https://console.anthropic.com
+   - If you need an Anthropic key, visit https://console.anthropic.com
 
 ## Bring up the server
-docker-compose up 
+docker compose up 
 
 ## Visit localhost
 http://localhost:8510
