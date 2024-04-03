@@ -5,8 +5,9 @@ import logging
 import os
 import json
 import pathlib
+import requests
 import streamlit as st
-from dotenv import load_dotenv
+from langchain_community.llms import Ollama
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.vectorstores import Chroma
@@ -19,14 +20,9 @@ from langchain_community.document_loaders import (
     UnstructuredExcelLoader,
 )
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_community.embeddings import HuggingFaceInstructEmbeddings
 
 logger = logging.getLogger(__name__)
-
-# Load environment variables
-load_dotenv(dotenv_path=os.environ.get("SECRETS_PATH"))
-
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 FILE_LOADERS = {
     "csv": CSVLoader,
@@ -73,24 +69,21 @@ class ChatWithFile:
         :param file_path: Full path and name of uploaded file
         :param file_type: File extension determined after upload
         """
+        with st.spinner("Downloading Instructor XL Embeddings Model locally....please be patient"):
+            self.embedding_model=HuggingFaceInstructEmbeddings(model_name="hkunlp/instructor-large", model_kwargs={"device": "cuda"})
+        self.conversation_history = []
+        self.vectordb = None
         loader = FILE_LOADERS[file_type](file_path=file_path)
         pages = loader.load_and_split()
         docs = self.split_into_chunks(pages)
         self.store_in_chroma(docs)
-
-        self.conversation_history = []
-        self.vectordb = None
 
         self.memory = ConversationBufferMemory(
             memory_key="chat_history",
             return_messages=True
         )
 
-        self.llm = ChatOpenAI(
-            temperature=0.7,
-            model="gpt-4-1106-preview",
-            openai_api_key=OPENAI_API_KEY
-        )
+        self.llm = Ollama(model=st.session_state['selected_model'], base_url="http://ollama:11434")
 
         self.qa = ConversationalRetrievalChain.from_llm(
             self.llm,
@@ -105,7 +98,7 @@ class ChatWithFile:
         :return: Result of langchain_experimental.text_splitter.SemanticChunker
         """
         text_splitter = SemanticChunker(
-            embeddings=OpenAIEmbeddings(),
+            embeddings=self.embedding_model,
             breakpoint_threshold_type="percentile"
         )
         return text_splitter.split_documents(pages)
@@ -190,7 +183,7 @@ class ChatWithFile:
         docs = [self.simplify_metadata(doc) for doc in docs]
 
         # Proceed with storing documents in Chroma
-        self.vectordb = Chroma.from_documents(docs, embedding=OpenAIEmbeddings())
+        self.vectordb = Chroma.from_documents(docs, embedding=self.embedding_model)
         self.vectordb.persist()
 
     # This method appears to be unused. Commenting for now
@@ -267,7 +260,7 @@ class ChatWithFile:
         related_queries = self.extract_json_from_response(generated_text)
 
         return related_queries
-
+   
     def chat(self, question):
         """
         Main chat interface. Generate a list of queries to send to the LLM, then
@@ -317,7 +310,7 @@ class ChatWithFile:
             if synthesized_response:
                 # Assuming synthesized_response is an AIMessage object with a 'content' attribute
                 st.write(synthesized_response)
-                final_answer = synthesized_response.content
+                final_answer = synthesized_response
             else:
                 final_answer = "Unable to synthesize a response."
 
@@ -332,6 +325,18 @@ class ChatWithFile:
         return {"answer": "No results were available to synthesize a response."}
 
 
+def get_ollama_models(base_url):
+    try:       
+        response = requests.get(f"{base_url}api/tags")  # Corrected endpoint
+        response.raise_for_status()
+        models_data = response.json()
+        # Extract just the model names for the dropdown
+        models = [model['name'] for model in models_data.get('models', [])]
+        return models
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to get models from Ollama: {e}")
+        return []
+        
 def upload_and_handle_file():
     """
     Present the file upload context. After upload, determine the file extension
@@ -362,17 +367,21 @@ def upload_and_handle_file():
             st.session_state["file_path"] = csv_pdf_txt_path
             st.session_state["file_type"] = file_type  # Store the file type in session state
             st.success(f"{file_type.upper()} file uploaded successfully.")
-            st.button(
-                "Proceed to Chat",
-                on_click=lambda: st.session_state.update({"page": 2})
-            )
+            # Fetch and display the models in a select box
+            models = get_ollama_models("http://ollama:11434/")  # Make sure to use the correct base URL
+            if models:
+                selected_model = st.selectbox("Select Model", models)
+                st.session_state['selected_model'] = selected_model            
+                st.button(
+                    "Proceed to Chat",
+                    on_click=lambda: st.session_state.update({"page": 2})
+                )
         else:
             st.error(
                 f"Unsupported file type. Please upload a "
                 f"{', '.join(ACCEPTED_FILE_TYPES[:-1]).upper()}, or "
                 f"{ACCEPTED_FILE_TYPES[-1].upper()} file."
             )
-
 
 def chat_interface():
     """
@@ -413,15 +422,8 @@ def chat_interface():
 
 
 if __name__ == "__main__":
-    if not OPENAI_API_KEY:
-        st.title("Document Buddy - Chat with Document Data")
-        st.error(
-            "No API keys have been defined - verify settings in the .env "
-            "file and restart the app using Docker Compose."
-        )
-    else:
-        if "page" not in st.session_state:
-            st.session_state["page"] = 1
+    if "page" not in st.session_state:
+        st.session_state["page"] = 1
 
     if st.session_state["page"] == 1:
         upload_and_handle_file()
