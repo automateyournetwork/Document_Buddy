@@ -310,7 +310,7 @@ class ChatWithFile:
             if synthesized_response:
                 # Assuming synthesized_response is an AIMessage object with a 'content' attribute
                 st.write(synthesized_response)
-                final_answer = synthesized_response.content
+                final_answer = synthesized_response
             else:
                 final_answer = "Unable to synthesize a response."
 
