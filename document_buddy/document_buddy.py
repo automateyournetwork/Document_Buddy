@@ -56,6 +56,11 @@ class AIMessage(Message):
     Represents a message from the AI.
     """
 
+@st.cache_resource
+def load_model():
+    with st.spinner("Downloading Instructor XL Embeddings Model locally....please be patient"):
+        embedding_model=HuggingFaceInstructEmbeddings(model_name="hkunlp/instructor-large", model_kwargs={"device": "cuda"})
+    return embedding_model
 
 class ChatWithFile:
     """
@@ -69,9 +74,7 @@ class ChatWithFile:
         :param file_path: Full path and name of uploaded file
         :param file_type: File extension determined after upload
         """
-        with st.spinner("Downloading Instructor XL Embeddings Model locally....please be patient"):
-            self.embedding_model=HuggingFaceInstructEmbeddings(model_name="hkunlp/instructor-large", model_kwargs={"device": "cuda"})
-        self.conversation_history = []
+        self.embedding_model = load_model()
         self.vectordb = None
         loader = FILE_LOADERS[file_type](file_path=file_path)
         pages = loader.load_and_split()
